@@ -1,5 +1,0 @@
-# Discord Guard — Accès HTTP contrôlé par token (CRON_SECRET dans config.php)
-# Le listage du répertoire est désactivé.
-# L'authentification est gérée par monitor.php lui-même via hash_equals().
-
-Options -Indexes

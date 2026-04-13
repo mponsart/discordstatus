@@ -28,7 +28,7 @@ $isCli  = PHP_SAPI === 'cli';
 $isHttp = !$isCli;
 
 // Résoudre le chemin depuis n'importe quel répertoire de travail
-$root = dirname(__DIR__);
+$root = __DIR__;
 
 // Diagnostic rapide : si ?debug=1 et que functions.php n'est pas trouvé
 if ($isHttp && isset($_GET['debug'])) {
