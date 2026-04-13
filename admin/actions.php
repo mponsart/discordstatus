@@ -104,38 +104,51 @@ if ($action === 'clear_alerts') {
 }
 
 // =============================================================================
-// Mise à jour du profil Discord public
+// Mise à jour du profil Discord public (champs manuels uniquement)
 // =============================================================================
 if ($action === 'update_profile') {
-    $allowedAvatarHosts = ['cdn.discordapp.com', 'media.discordapp.net', 'i.imgur.com', 'imgur.com'];
+    $bio         = mb_substr(trim($_POST['discord_bio']    ?? ''), 0, 300);
+    $joined      = mb_substr(trim($_POST['discord_joined'] ?? ''), 0, 30);
+    $showHistory = isset($_POST['show_public_history']) ? '1' : '0';
 
-    $username      = mb_substr(trim($_POST['discord_username']      ?? ''), 0, 64);
-    $discriminator = mb_substr(trim($_POST['discord_discriminator'] ?? ''), 0, 10);
-    $bio           = mb_substr(trim($_POST['discord_bio']           ?? ''), 0, 300);
-    $joined        = mb_substr(trim($_POST['discord_joined']        ?? ''), 0, 30);
-    $showHistory   = isset($_POST['show_public_history']) ? '1' : '0';
-
-    // Validation de l'URL d'avatar (SSRF protection : hôtes autorisés uniquement)
-    $avatarRaw  = trim($_POST['discord_avatar_url'] ?? '');
-    $avatarUrl  = '';
-    if ($avatarRaw !== '') {
-        $parsed = parse_url($avatarRaw);
-        $host   = strtolower($parsed['host'] ?? '');
-        if (in_array($host, $allowedAvatarHosts, true)
-            && in_array($parsed['scheme'] ?? '', ['https'], true)) {
-            $avatarUrl = $avatarRaw;
-        }
-    }
-
-    set_setting('discord_username',      $username);
-    set_setting('discord_discriminator', $discriminator);
-    set_setting('discord_avatar_url',    $avatarUrl);
-    set_setting('discord_bio',           $bio);
-    set_setting('discord_joined',        $joined);
-    set_setting('show_public_history',   $showHistory);
+    set_setting('discord_bio',          $bio);
+    set_setting('discord_joined',       $joined);
+    set_setting('show_public_history',  $showHistory);
 
     log_action('profile_updated');
     header('Location: /admin/dashboard.php?success=profile_saved&tab=profile');
+    exit;
+}
+
+// =============================================================================
+// Lancer une vérification Discord immédiate (sans attendre le cron)
+// =============================================================================
+if ($action === 'run_monitor') {
+    $result = run_discord_monitor();
+    $n      = count($result['changes'] ?? []);
+    $param  = $n > 0 ? 'monitor_changes_' . $n : 'monitor_ok';
+    log_action('monitor_manual_run', ['result' => $result['status'] ?? 'unknown', 'changes' => $n]);
+    header('Location: /admin/dashboard.php?success=' . $param . '&tab=profile');
+    exit;
+}
+
+// =============================================================================
+// Réinitialiser le statut à « Sécurisé » (reset manuel après anomalie)
+// =============================================================================
+if ($action === 'reset_to_secure') {
+    $current = get_setting('status', 'secure');
+    if ($current !== 'secure') {
+        set_setting('status',        'secure');
+        set_setting('last_updated',  date('c'));
+        set_setting('status_source', 'manual');
+        $stmt = get_db()->prepare(
+            'INSERT INTO status_history (date, status, note) VALUES (?, ?, ?)'
+        );
+        $stmt->execute([date('c'), 'secure', 'Statut réinitialisé manuellement par l\'administrateur']);
+        log_action('status_reset_to_secure');
+        send_discord_status_change('secure');
+    }
+    header('Location: /admin/dashboard.php?success=status_reset&tab=profile');
     exit;
 }
 
