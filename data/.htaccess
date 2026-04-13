@@ -1,0 +1,3 @@
+# Bloquer tout accès direct au répertoire data/
+# Les fichiers JSON ne doivent jamais être accessibles publiquement.
+Require all denied

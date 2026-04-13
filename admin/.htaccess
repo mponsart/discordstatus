@@ -1,0 +1,12 @@
+# ---------------------------------------------------------------------------
+# Discord Guard — .htaccess admin/
+# ---------------------------------------------------------------------------
+
+# Désactiver la liste des répertoires
+Options -Indexes
+
+# En-têtes supplémentaires propres à l'admin
+<IfModule mod_headers.c>
+    Header always set Cache-Control "no-store, no-cache, must-revalidate, private"
+    Header always set Pragma "no-cache"
+</IfModule>

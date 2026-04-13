@@ -1,0 +1,35 @@
+# ---------------------------------------------------------------------------
+# Discord Guard — .htaccess racine
+# ---------------------------------------------------------------------------
+
+# HTTPS obligatoire (décommenter si votre hébergeur le supporte)
+# RewriteEngine On
+# RewriteCond %{HTTPS} off
+# RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# Désactiver la signature du serveur
+ServerSignature Off
+
+# Empêcher la liste des répertoires
+Options -Indexes
+
+# Empêcher l'accès direct aux fichiers sensibles
+<FilesMatch "\.(json|log|bak|tmp|sql|env)$">
+    Require all denied
+</FilesMatch>
+
+# Protéger config.php et functions.php depuis l'extérieur
+<FilesMatch "^(config|functions)\.php$">
+    Require all denied
+</FilesMatch>
+
+# En-têtes de sécurité
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "DENY"
+    Header always set X-XSS-Protection "1; mode=block"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+    # CSP strict — adapté aux passkeys et Tailwind CDN
+    Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none';"
+</IfModule>
