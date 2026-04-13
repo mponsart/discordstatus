@@ -23,23 +23,50 @@
  *  - Il s'exécute uniquement en CLI ou via actions.php (admin authentifié)
  */
 
-// Bloc d'accès web direct (double protection au cas où .htaccess échouerait)
-if (PHP_SAPI !== 'cli') {
-    http_response_code(403);
-    exit('Accès interdit. Ce script s\'exécute uniquement en tâche cron CLI.');
-}
+// ─── Contrôle d'accès ───────────────────────────────────────────────────────
+$isCli  = PHP_SAPI === 'cli';
+$isHttp = !$isCli;
 
 // Résoudre le chemin depuis n'importe quel répertoire de travail
 $root = dirname(__DIR__);
 require_once $root . '/functions.php';
 
+if ($isHttp) {
+    // En HTTP : token obligatoire via ?token=... ou en-tête Authorization: Bearer ...
+    $provided = $_GET['token']
+        ?? (isset($_SERVER['HTTP_AUTHORIZATION'])
+            ? preg_replace('/^Bearer\s+/i', '', $_SERVER['HTTP_AUTHORIZATION'])
+            : '');
+
+    if (!defined('CRON_SECRET') || CRON_SECRET === ''
+        || !hash_equals(CRON_SECRET, (string) $provided)
+    ) {
+        http_response_code(403);
+        header('Content-Type: application/json');
+        exit(json_encode(['error' => 'Token invalide ou absent.']));
+    }
+
+    // Réponse JSON pour les appels HTTP
+    header('Content-Type: application/json');
+}
+
 $startTime = microtime(true);
 
-echo '[' . date('Y-m-d H:i:s') . '] Discord Guard Monitor — démarrage' . PHP_EOL;
+if ($isCli) {
+    echo '[' . date('Y-m-d H:i:s') . '] Discord Guard Monitor — démarrage' . PHP_EOL;
+}
 
 $result = run_discord_monitor();
 $elapsed = round((microtime(true) - $startTime) * 1000);
 
+if ($isHttp) {
+    // Réponse JSON concise pour les cron HTTP
+    $result['elapsed_ms'] = $elapsed;
+    echo json_encode($result);
+    exit;
+}
+
+// ─── Sortie texte pour CLI ───────────────────────────────────────────────────
 switch ($result['status'] ?? 'unknown') {
     case 'not_configured':
         echo "[{$elapsed}ms] ⚫ Non configuré : DISCORD_BOT_TOKEN, DISCORD_TARGET_USER_ID ou DISCORD_GUILD_ID manquant." . PHP_EOL;

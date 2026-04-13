@@ -111,3 +111,19 @@ define('DISCORD_TARGET_USER_ID', '');
  * À CONFIGURER ↓
  */
 define('DISCORD_GUILD_ID', '');
+
+// =============================================================================
+// TOKEN D'ACCÈS HTTP DU CRON
+// =============================================================================
+
+/**
+ * Token secret pour déclencher le monitoring via une requête HTTP.
+ * Permet d'utiliser un service de cron externe (ex: cron-job.org) à la place
+ * d'une tâche cPanel CLI.
+ *
+ * URL d'appel : https://maximeponsart.fr/cron/monitor.php?token=VALEUR_ICI
+ *
+ * ⚠️  Gardez ce token secret — quiconque le possède peut déclencher une vérification.
+ *     (La vérification est en lecture seule, elle ne modifie rien de critique.)
+ */
+define('CRON_SECRET', '617f0ee0d48c3fc23e50465ab24af55431752ea6b4ea55b4e384b5dddd43a76c');
