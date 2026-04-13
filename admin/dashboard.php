@@ -21,17 +21,54 @@ $profile     = get_discord_profile();
 $totalLogs   = count_table('logs');
 $totalAlerts = count_table('alerts');
 
+// Données CV
+$cv = [
+    'title'       => get_setting('cv_title',       ''),
+    'tagline'     => get_setting('cv_tagline',      ''),
+    'email'       => get_setting('cv_email',        ''),
+    'github'      => get_setting('cv_github',       ''),
+    'linkedin'    => get_setting('cv_linkedin',     ''),
+    'skills'      => json_decode(get_setting('cv_skills',      '[]'), true) ?: [],
+    'experiences' => json_decode(get_setting('cv_experiences', '[]'), true) ?: [],
+    'education'   => json_decode(get_setting('cv_education',   '[]'), true) ?: [],
+    'projects'    => json_decode(get_setting('cv_projects',    '[]'), true) ?: [],
+];
+
 // CSRF token
 $csrf = generate_csrf_token();
 
 // Log de cette visite
 log_action('dashboard_view');
 
+// Flash messages
+$flash = ''; $flashType = 'success';
+$s = $_GET['success'] ?? '';
+if ($s !== '') {
+    $flashMap = [
+        'status_updated' => 'Statut mis à jour.',
+        'settings_saved' => 'Paramètres enregistrés.',
+        'profile_saved'  => 'Profil enregistré.',
+        'logs_cleared'   => 'Logs supprimés.',
+        'alerts_cleared' => 'Alertes supprimées.',
+        'status_reset'   => 'Statut réinitialisé à « Sécurisé ».',
+        'monitor_ok'     => 'Vérification OK — aucun changement détecté.',
+        'cv_saved'       => 'CV enregistré.',
+        'cv_error'       => 'Erreur lors de la sauvegarde du CV.',
+        'invalid_url'    => 'URL invalide.',
+        'invalid_email'  => 'Adresse e-mail invalide.',
+    ];
+    $flash = $flashMap[$s] ?? '';
+    if ($flash === '' && preg_match('/^monitor_changes_(\d+)$/', $s, $m)) {
+        $flash = $m[1] . ' changement(s) détecté(s) — voir les alertes.';
+        $flashType = 'warning';
+    }
+}
+
 // Config visuelle
 $statusCfg = [
-    'secure'      => ['label' => '🟢 Sécurisé',          'class' => 'text-green-400',  'bg' => 'bg-green-900/30',  'ring' => 'ring-green-500/40'],
-    'warning'     => ['label' => '🟠 Activité suspecte',  'class' => 'text-yellow-400', 'bg' => 'bg-yellow-900/30', 'ring' => 'ring-yellow-500/40'],
-    'compromised' => ['label' => '🔴 Compte compromis',   'class' => 'text-red-400',    'bg' => 'bg-red-900/30',    'ring' => 'ring-red-500/40'],
+    'secure'      => ['label' => 'Compte sécurisé',   'icon' => '🛡️', 'class' => 'text-emerald-400', 'bg' => 'bg-emerald-900/30', 'ring' => 'ring-emerald-500/40'],
+    'warning'     => ['label' => 'Activité suspecte',  'icon' => '⚠️', 'class' => 'text-yellow-400',  'bg' => 'bg-yellow-900/30',  'ring' => 'ring-yellow-500/40'],
+    'compromised' => ['label' => 'Compte compromis',   'icon' => '🚨', 'class' => 'text-red-400',     'bg' => 'bg-red-900/30',     'ring' => 'ring-red-500/40'],
 ];
 $sc = $statusCfg[$status] ?? $statusCfg['secure'];
 ?>
@@ -83,6 +120,13 @@ $sc = $statusCfg[$status] ?? $statusCfg['secure'];
      ====================================================== -->
 <main class="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-8">
 
+    <?php if ($flash): ?>
+    <div class="rounded-xl px-4 py-3 text-sm font-semibold ring-1 flex items-center gap-2
+        <?= $flashType === 'warning' ? 'bg-yellow-950/50 ring-yellow-500/30 text-yellow-300' : 'bg-emerald-950/50 ring-emerald-500/30 text-emerald-300' ?>">
+        <?= $flashType === 'warning' ? '⚠️' : '✅' ?> <?= htmlspecialchars($flash, ENT_QUOTES, 'UTF-8') ?>
+    </div>
+    <?php endif; ?>
+
     <!-- ── Statut courant ── -->
     <section>
         <h2 class="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-4">Statut courant</h2>
@@ -91,7 +135,7 @@ $sc = $statusCfg[$status] ?? $statusCfg['secure'];
             <!-- Carte statut -->
             <div class="sm:col-span-2 bg-gray-900 ring-1 ring-gray-800 rounded-2xl p-6 flex items-center gap-5">
                 <div class="w-14 h-14 rounded-xl <?= $sc['bg'] ?> ring-1 <?= $sc['ring'] ?> flex items-center justify-center text-2xl flex-shrink-0">
-                    <?= $status === 'secure' ? '🛡️' : ($status === 'warning' ? '⚠️' : '🚨') ?>
+                    <?= $sc['icon'] ?>
                 </div>
                 <div>
                     <p class="text-sm text-gray-500">Statut actuel</p>
@@ -166,6 +210,9 @@ $sc = $statusCfg[$status] ?? $statusCfg['secure'];
             <button onclick="showTab('profile')" id="tab-profile" class="tab-btn px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 transition-colors">
                 Profil Discord
             </button>
+            <button onclick="showTab('cv')" id="tab-cv" class="tab-btn px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 transition-colors">
+                CV public
+            </button>
         </div>
 
         <!-- ── Onglet Logs ── -->
@@ -195,18 +242,20 @@ $sc = $statusCfg[$status] ?? $statusCfg['secure'];
                             <td class="px-4 py-3">
                                 <?php
                                 $actionLabel = match ($log['action'] ?? '') {
-                                    'admin_login_success' => '<span class="text-green-400">✅ Connexion</span>',
-                                    'admin_login_failure' => '<span class="text-red-400">❌ Échec connexion</span>',
-                                    'dashboard_view'      => '<span class="text-gray-300">👁 Dashboard</span>',
-                                    'status_changed'      => '<span class="text-yellow-400">⚙️ Statut modifié</span>',
-                                    'passkey_registered'  => '<span class="text-indigo-400">🔑 Passkey enregistrée</span>',
-                                    'gate_success'        => '<span class="text-green-400">🔓 Clé validée</span>',
-                                    'gate_failure'        => '<span class="text-red-400">🔒 Clé incorrecte</span>',
-                                    'profile_updated'     => '<span class="text-blue-400">👤 Profil mis à jour</span>',
-                                    'settings_updated'    => '<span class="text-blue-300">⚙️ Paramètres MAJ</span>',
-                                    'logs_cleared'        => '<span class="text-orange-400">🗑 Logs purgés</span>',
-                                    'alerts_cleared'      => '<span class="text-orange-400">🗑 Alertes purgées</span>',
-                                    default               => '<span class="text-gray-400">' . htmlspecialchars($log['action'] ?? '', ENT_QUOTES, 'UTF-8') . '</span>',
+                                    'admin_login_success'    => '<span class="text-emerald-400">✅ Connexion</span>',
+                                    'admin_login_failure'    => '<span class="text-red-400">❌ Échec connexion</span>',
+                                    'admin_logout'           => '<span class="text-gray-400">🚪 Déconnexion</span>',
+                                    'dashboard_view'         => '<span class="text-gray-600">👁 Dashboard</span>',
+                                    'status_changed'         => '<span class="text-yellow-400">⚙️ Statut modifié</span>',
+                                    'status_reset_to_secure' => '<span class="text-emerald-400">🛡️ Statut réinitialisé</span>',
+                                    'passkey_registered'     => '<span class="text-indigo-400">🔑 Passkey enregistrée</span>',
+                                    'passkey_added'          => '<span class="text-indigo-300">🔑 Passkey ajoutée</span>',
+                                    'profile_updated'        => '<span class="text-blue-400">👤 Profil MAJ</span>',
+                                    'settings_updated'       => '<span class="text-blue-300">⚙️ Paramètres MAJ</span>',
+                                    'logs_cleared'           => '<span class="text-orange-400">🗑 Logs purgés</span>',
+                                    'alerts_cleared'         => '<span class="text-orange-400">🗑 Alertes purgées</span>',
+                                    'monitor_manual_run'     => '<span class="text-violet-400">🤖 Vérification manuelle</span>',
+                                    default                  => '<span class="text-gray-500">' . htmlspecialchars($log['action'] ?? '', ENT_QUOTES, 'UTF-8') . '</span>',
                                 };
                                 echo $actionLabel;
                                 ?>
@@ -399,8 +448,7 @@ $sc = $statusCfg[$status] ?? $statusCfg['secure'];
                     <li><span class="text-amber-400">DISCORD_GUILD_ID</span> — ID d'un serveur commun entre le bot et vous</li>
                 </ul>
                 <p class="text-xs text-amber-700/70 mt-3 leading-relaxed">
-                    Ensuite, ajoutez une tâche cron cPanel :<br>
-                    <code class="text-amber-500">*/5 * * * * /usr/bin/php /home/USER/public_html/cron/monitor.php</code>
+                    URL cron HTTP : <code class="text-amber-500 bg-black/20 rounded px-1">https://maximeponsart.fr/monitor.php?token=CRON_SECRET</code>
                 </p>
             </div>
             <?php else: ?>
@@ -550,6 +598,183 @@ $sc = $statusCfg[$status] ?? $statusCfg['secure'];
             </div>
         </div>
 
+        <!-- ── Onglet CV public ── -->
+        <div id="panel-cv" class="tab-panel">
+            <form method="POST" action="/admin/actions.php" id="form-cv">
+                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
+                <input type="hidden" name="action" value="save_cv">
+                <input type="hidden" name="cv_skills"      id="input-cv-skills"      value="<?= htmlspecialchars(json_encode($cv['skills'],      JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8') ?>">
+                <input type="hidden" name="cv_experiences" id="input-cv-experiences" value="<?= htmlspecialchars(json_encode($cv['experiences'], JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8') ?>">
+                <input type="hidden" name="cv_education"   id="input-cv-education"   value="<?= htmlspecialchars(json_encode($cv['education'],   JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8') ?>">
+                <input type="hidden" name="cv_projects"    id="input-cv-projects"    value="<?= htmlspecialchars(json_encode($cv['projects'],    JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8') ?>">
+
+                <div class="space-y-8">
+
+                    <!-- Infos générales -->
+                    <div class="bg-gray-900 rounded-2xl p-6 ring-1 ring-gray-800">
+                        <h3 class="text-sm font-semibold text-white mb-4">Informations générales</h3>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Titre / poste</label>
+                                <input type="text" name="cv_title" maxlength="100"
+                                       value="<?= htmlspecialchars($cv['title'], ENT_QUOTES, 'UTF-8') ?>"
+                                       placeholder="ex : Développeur web full stack"
+                                       class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">E-mail public</label>
+                                <input type="email" name="cv_email" maxlength="200"
+                                       value="<?= htmlspecialchars($cv['email'], ENT_QUOTES, 'UTF-8') ?>"
+                                       placeholder="contact@exemple.fr"
+                                       class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">GitHub (URL)</label>
+                                <input type="url" name="cv_github" maxlength="200"
+                                       value="<?= htmlspecialchars($cv['github'], ENT_QUOTES, 'UTF-8') ?>"
+                                       placeholder="https://github.com/…"
+                                       class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">LinkedIn (URL)</label>
+                                <input type="url" name="cv_linkedin" maxlength="200"
+                                       value="<?= htmlspecialchars($cv['linkedin'], ENT_QUOTES, 'UTF-8') ?>"
+                                       placeholder="https://linkedin.com/in/…"
+                                       class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50">
+                            </div>
+                            <div class="sm:col-span-2">
+                                <label class="block text-xs text-gray-400 mb-1">Accroche (tagline)</label>
+                                <textarea name="cv_tagline" maxlength="300" rows="2"
+                                          placeholder="Passionné de développement web, spécialisé en PHP et JavaScript…"
+                                          class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 resize-none"><?= htmlspecialchars($cv['tagline'], ENT_QUOTES, 'UTF-8') ?></textarea>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Compétences -->
+                    <div class="bg-gray-900 rounded-2xl p-6 ring-1 ring-gray-800">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-sm font-semibold text-white">Compétences</h3>
+                            <button type="button" onclick="cvAddSkill()"
+                                    class="text-xs bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-400 ring-1 ring-indigo-500/30 rounded-lg px-3 py-1.5 transition-colors">
+                                + Ajouter
+                            </button>
+                        </div>
+                        <div id="cv-skills" class="flex flex-wrap gap-2">
+                            <?php foreach ($cv['skills'] as $skill): ?>
+                            <div class="cv-skill-tag flex items-center gap-1.5 bg-gray-800 ring-1 ring-gray-700 rounded-lg px-2 py-1">
+                                <input type="text" maxlength="40" value="<?= htmlspecialchars($skill, ENT_QUOTES, 'UTF-8') ?>"
+                                       placeholder="Compétence"
+                                       class="bg-transparent text-sm text-white w-24 focus:outline-none focus:w-32 transition-all">
+                                <button type="button" onclick="this.closest('.cv-skill-tag').remove()"
+                                        class="text-gray-600 hover:text-red-400 text-xs leading-none transition-colors">✕</button>
+                            </div>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+
+                    <!-- Expériences -->
+                    <div class="bg-gray-900 rounded-2xl p-6 ring-1 ring-gray-800">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-sm font-semibold text-white">Expériences professionnelles</h3>
+                            <button type="button" onclick="cvAddExp()"
+                                    class="text-xs bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-400 ring-1 ring-indigo-500/30 rounded-lg px-3 py-1.5 transition-colors">
+                                + Ajouter
+                            </button>
+                        </div>
+                        <div id="cv-experiences" class="space-y-4">
+                            <?php foreach ($cv['experiences'] as $exp): ?>
+                            <div class="cv-item bg-gray-800 rounded-xl p-4 ring-1 ring-gray-700">
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                                    <input type="text" data-field="title" maxlength="100" value="<?= htmlspecialchars($exp['title'] ?? '', ENT_QUOTES, 'UTF-8') ?>" placeholder="Intitulé du poste"
+                                           class="bg-gray-700/60 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                                    <input type="text" data-field="company" maxlength="100" value="<?= htmlspecialchars($exp['company'] ?? '', ENT_QUOTES, 'UTF-8') ?>" placeholder="Entreprise"
+                                           class="bg-gray-700/60 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                                    <input type="text" data-field="dates" maxlength="60" value="<?= htmlspecialchars($exp['dates'] ?? '', ENT_QUOTES, 'UTF-8') ?>" placeholder="ex : Janv. 2023 – Présent"
+                                           class="bg-gray-700/60 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                                    <button type="button" onclick="this.closest('.cv-item').remove()"
+                                            class="text-red-500/70 hover:text-red-400 text-xs ring-1 ring-red-500/20 rounded-lg px-3 py-1.5 transition-colors text-left sm:text-center">
+                                        Supprimer
+                                    </button>
+                                </div>
+                                <textarea data-field="description" rows="2" maxlength="400" placeholder="Description (optionnel)"
+                                          class="w-full bg-gray-700/60 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"><?= htmlspecialchars($exp['description'] ?? '', ENT_QUOTES, 'UTF-8') ?></textarea>
+                            </div>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+
+                    <!-- Formation -->
+                    <div class="bg-gray-900 rounded-2xl p-6 ring-1 ring-gray-800">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-sm font-semibold text-white">Formation</h3>
+                            <button type="button" onclick="cvAddEdu()"
+                                    class="text-xs bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-400 ring-1 ring-indigo-500/30 rounded-lg px-3 py-1.5 transition-colors">
+                                + Ajouter
+                            </button>
+                        </div>
+                        <div id="cv-education" class="space-y-4">
+                            <?php foreach ($cv['education'] as $edu): ?>
+                            <div class="cv-item bg-gray-800 rounded-xl p-4 ring-1 ring-gray-700">
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                                    <input type="text" data-field="degree" maxlength="100" value="<?= htmlspecialchars($edu['degree'] ?? '', ENT_QUOTES, 'UTF-8') ?>" placeholder="Diplôme / filière"
+                                           class="bg-gray-700/60 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                                    <input type="text" data-field="school" maxlength="100" value="<?= htmlspecialchars($edu['school'] ?? '', ENT_QUOTES, 'UTF-8') ?>" placeholder="École / université"
+                                           class="bg-gray-700/60 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                                    <input type="text" data-field="dates" maxlength="60" value="<?= htmlspecialchars($edu['dates'] ?? '', ENT_QUOTES, 'UTF-8') ?>" placeholder="ex : 2020 – 2023"
+                                           class="bg-gray-700/60 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                                    <button type="button" onclick="this.closest('.cv-item').remove()"
+                                            class="text-red-500/70 hover:text-red-400 text-xs ring-1 ring-red-500/20 rounded-lg px-3 py-1.5 transition-colors text-left sm:text-center">
+                                        Supprimer
+                                    </button>
+                                </div>
+                                <textarea data-field="description" rows="2" maxlength="300" placeholder="Description (optionnel)"
+                                          class="w-full bg-gray-700/60 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"><?= htmlspecialchars($edu['description'] ?? '', ENT_QUOTES, 'UTF-8') ?></textarea>
+                            </div>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+
+                    <!-- Projets -->
+                    <div class="bg-gray-900 rounded-2xl p-6 ring-1 ring-gray-800">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-sm font-semibold text-white">Projets</h3>
+                            <button type="button" onclick="cvAddProject()"
+                                    class="text-xs bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-400 ring-1 ring-indigo-500/30 rounded-lg px-3 py-1.5 transition-colors">
+                                + Ajouter
+                            </button>
+                        </div>
+                        <div id="cv-projects" class="space-y-4">
+                            <?php foreach ($cv['projects'] as $proj): ?>
+                            <div class="cv-item bg-gray-800 rounded-xl p-4 ring-1 ring-gray-700">
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                                    <input type="text" data-field="title" maxlength="100" value="<?= htmlspecialchars($proj['title'] ?? '', ENT_QUOTES, 'UTF-8') ?>" placeholder="Nom du projet"
+                                           class="bg-gray-700/60 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                                    <input type="url" data-field="url" maxlength="200" value="<?= htmlspecialchars($proj['url'] ?? '', ENT_QUOTES, 'UTF-8') ?>" placeholder="URL (optionnel)"
+                                           class="bg-gray-700/60 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                                    <input type="text" data-field="tech" maxlength="150" value="<?= htmlspecialchars($proj['tech'] ?? '', ENT_QUOTES, 'UTF-8') ?>" placeholder="Stack (PHP, JS, …)"
+                                           class="bg-gray-700/60 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                                    <button type="button" onclick="this.closest('.cv-item').remove()"
+                                            class="text-red-500/70 hover:text-red-400 text-xs ring-1 ring-red-500/20 rounded-lg px-3 py-1.5 transition-colors text-left sm:text-center">
+                                        Supprimer
+                                    </button>
+                                </div>
+                                <textarea data-field="description" rows="2" maxlength="400" placeholder="Description du projet"
+                                          class="w-full bg-gray-700/60 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"><?= htmlspecialchars($proj['description'] ?? '', ENT_QUOTES, 'UTF-8') ?></textarea>
+                            </div>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+
+                    <button type="submit" id="btn-save-cv"
+                            class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl px-4 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        Enregistrer le CV
+                    </button>
+
+                </div>
+            </form>
+        </div>
+
     </section>
 
 </main>
@@ -562,7 +787,7 @@ $sc = $statusCfg[$status] ?? $statusCfg['secure'];
 </footer>
 
 <script>
-const TABS = ['logs', 'alerts', 'settings', 'profile'];
+const TABS = ['logs', 'alerts', 'settings', 'profile', 'cv'];
 
 function showTab(name) {
     TABS.forEach(t => {
@@ -654,6 +879,89 @@ function showPasskeyStatus(type, msg) {
     box.classList.add(...(classes[type] || classes.info));
     box.textContent = msg;
 }
+
+// ── Gestion CV ───────────────────────────────────────────────────────────────
+function cvSkillHtml(val = '') {
+    const d = document.createElement('div');
+    d.className = 'cv-skill-tag flex items-center gap-1.5 bg-gray-800 ring-1 ring-gray-700 rounded-lg px-2 py-1';
+    d.innerHTML = `<input type="text" maxlength="40" value="${val.replace(/"/g,'&quot;')}" placeholder="Compétence"
+        class="bg-transparent text-sm text-white w-24 focus:outline-none focus:w-32 transition-all">
+        <button type="button" onclick="this.closest('.cv-skill-tag').remove()" class="text-gray-600 hover:text-red-400 text-xs leading-none transition-colors">✕</button>`;
+    return d;
+}
+function cvAddSkill() { document.getElementById('cv-skills').appendChild(cvSkillHtml()); }
+
+function cvExpHtml(d={}) {
+    const el = document.createElement('div');
+    el.className = 'cv-item bg-gray-800 rounded-xl p-4 ring-1 ring-gray-700';
+    el.innerHTML = `<div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+        <input type="text" data-field="title" maxlength="100" value="${(d.title||'').replace(/"/g,'&quot;')}" placeholder="Intitulé du poste" class="bg-gray-700/60 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+        <input type="text" data-field="company" maxlength="100" value="${(d.company||'').replace(/"/g,'&quot;')}" placeholder="Entreprise" class="bg-gray-700/60 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+        <input type="text" data-field="dates" maxlength="60" value="${(d.dates||'').replace(/"/g,'&quot;')}" placeholder="ex : Janv. 2023 – Présent" class="bg-gray-700/60 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+        <button type="button" onclick="this.closest('.cv-item').remove()" class="text-red-500/70 hover:text-red-400 text-xs ring-1 ring-red-500/20 rounded-lg px-3 py-1.5 transition-colors text-left sm:text-center">Supprimer</button>
+    </div>
+    <textarea data-field="description" rows="2" maxlength="400" placeholder="Description (optionnel)" class="w-full bg-gray-700/60 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none">${(d.description||'').replace(/</g,'&lt;')}</textarea>`;
+    return el;
+}
+function cvAddExp() { document.getElementById('cv-experiences').appendChild(cvExpHtml()); }
+
+function cvEduHtml(d={}) {
+    const el = document.createElement('div');
+    el.className = 'cv-item bg-gray-800 rounded-xl p-4 ring-1 ring-gray-700';
+    el.innerHTML = `<div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+        <input type="text" data-field="degree" maxlength="100" value="${(d.degree||'').replace(/"/g,'&quot;')}" placeholder="Diplôme / filière" class="bg-gray-700/60 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+        <input type="text" data-field="school" maxlength="100" value="${(d.school||'').replace(/"/g,'&quot;')}" placeholder="École / université" class="bg-gray-700/60 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+        <input type="text" data-field="dates" maxlength="60" value="${(d.dates||'').replace(/"/g,'&quot;')}" placeholder="ex : 2020 – 2023" class="bg-gray-700/60 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+        <button type="button" onclick="this.closest('.cv-item').remove()" class="text-red-500/70 hover:text-red-400 text-xs ring-1 ring-red-500/20 rounded-lg px-3 py-1.5 transition-colors text-left sm:text-center">Supprimer</button>
+    </div>
+    <textarea data-field="description" rows="2" maxlength="300" placeholder="Description (optionnel)" class="w-full bg-gray-700/60 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none">${(d.description||'').replace(/</g,'&lt;')}</textarea>`;
+    return el;
+}
+function cvAddEdu() { document.getElementById('cv-education').appendChild(cvEduHtml()); }
+
+function cvProjectHtml(d={}) {
+    const el = document.createElement('div');
+    el.className = 'cv-item bg-gray-800 rounded-xl p-4 ring-1 ring-gray-700';
+    el.innerHTML = `<div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+        <input type="text" data-field="title" maxlength="100" value="${(d.title||'').replace(/"/g,'&quot;')}" placeholder="Nom du projet" class="bg-gray-700/60 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+        <input type="url" data-field="url" maxlength="200" value="${(d.url||'').replace(/"/g,'&quot;')}" placeholder="URL (optionnel)" class="bg-gray-700/60 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+        <input type="text" data-field="tech" maxlength="150" value="${(d.tech||'').replace(/"/g,'&quot;')}" placeholder="Stack (PHP, JS, …)" class="bg-gray-700/60 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+        <button type="button" onclick="this.closest('.cv-item').remove()" class="text-red-500/70 hover:text-red-400 text-xs ring-1 ring-red-500/20 rounded-lg px-3 py-1.5 transition-colors text-left sm:text-center">Supprimer</button>
+    </div>
+    <textarea data-field="description" rows="2" maxlength="400" placeholder="Description du projet" class="w-full bg-gray-700/60 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none">${(d.description||'').replace(/</g,'&lt;')}</textarea>`;
+    return el;
+}
+function cvAddProject() { document.getElementById('cv-projects').appendChild(cvProjectHtml()); }
+
+// Sérialisation CV avant soumission
+document.getElementById('form-cv').addEventListener('submit', function () {
+    // Skills
+    const skills = [...document.querySelectorAll('#cv-skills .cv-skill-tag input')]
+        .map(i => i.value.trim()).filter(Boolean);
+    document.getElementById('input-cv-skills').value = JSON.stringify(skills);
+
+    // Helper pour les blocs avec data-field
+    function serializeItems(containerId, fields) {
+        return [...document.querySelectorAll('#' + containerId + ' .cv-item')].map(item => {
+            const obj = {};
+            fields.forEach(f => {
+                const el = item.querySelector('[data-field="' + f + '"]');
+                obj[f] = el ? el.value.trim() : '';
+            });
+            return obj;
+        }).filter(obj => Object.values(obj).some(Boolean));
+    }
+
+    document.getElementById('input-cv-experiences').value = JSON.stringify(
+        serializeItems('cv-experiences', ['title', 'company', 'dates', 'description'])
+    );
+    document.getElementById('input-cv-education').value = JSON.stringify(
+        serializeItems('cv-education', ['degree', 'school', 'dates', 'description'])
+    );
+    document.getElementById('input-cv-projects').value = JSON.stringify(
+        serializeItems('cv-projects', ['title', 'url', 'tech', 'description'])
+    );
+});
 </script>
 
 </body>

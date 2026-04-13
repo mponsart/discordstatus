@@ -151,6 +151,52 @@ if ($action === 'reset_to_secure') {
     exit;
 }
 
+// =============================================================================
+// Sauvegarde du CV public
+// =============================================================================
+if ($action === 'save_cv') {
+    // Champs simples
+    $cv_title   = mb_substr(trim($_POST['cv_title']   ?? ''), 0, 100);
+    $cv_tagline = mb_substr(trim($_POST['cv_tagline'] ?? ''), 0, 300);
+    $cv_email   = mb_substr(trim($_POST['cv_email']   ?? ''), 0, 200);
+    $cv_github  = mb_substr(trim($_POST['cv_github']  ?? ''), 0, 200);
+    $cv_linkedin = mb_substr(trim($_POST['cv_linkedin'] ?? ''), 0, 200);
+
+    // Validation URLs (vide autorisé)
+    foreach (['cv_github' => $cv_github, 'cv_linkedin' => $cv_linkedin] as $k => $v) {
+        if ($v !== '' && !filter_var($v, FILTER_VALIDATE_URL)) {
+            header('Location: /admin/dashboard.php?error=invalid_url&tab=cv');
+            exit;
+        }
+    }
+    // Email
+    if ($cv_email !== '' && !filter_var($cv_email, FILTER_VALIDATE_EMAIL)) {
+        header('Location: /admin/dashboard.php?error=invalid_email&tab=cv');
+        exit;
+    }
+
+    // Champs JSON (skills, expériences, formations, projets)
+    $decode_json_post = static function (string $key): string {
+        $raw = $_POST[$key] ?? '[]';
+        $arr = json_decode($raw, true);
+        return is_array($arr) ? json_encode($arr, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : '[]';
+    };
+
+    set_setting('cv_title',       $cv_title);
+    set_setting('cv_tagline',     $cv_tagline);
+    set_setting('cv_email',       $cv_email);
+    set_setting('cv_github',      $cv_github);
+    set_setting('cv_linkedin',    $cv_linkedin);
+    set_setting('cv_skills',      $decode_json_post('cv_skills'));
+    set_setting('cv_experiences', $decode_json_post('cv_experiences'));
+    set_setting('cv_education',   $decode_json_post('cv_education'));
+    set_setting('cv_projects',    $decode_json_post('cv_projects'));
+
+    log_action('cv_updated');
+    header('Location: /admin/dashboard.php?success=cv_saved&tab=cv');
+    exit;
+}
+
 // Action inconnue
 header('Location: /admin/dashboard.php');
 exit;
