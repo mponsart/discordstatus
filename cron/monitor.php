@@ -29,6 +29,21 @@ $isHttp = !$isCli;
 
 // Résoudre le chemin depuis n'importe quel répertoire de travail
 $root = dirname(__DIR__);
+
+// Diagnostic rapide : si ?debug=1 et que functions.php n'est pas trouvé
+if ($isHttp && isset($_GET['debug'])) {
+    header('Content-Type: application/json');
+    echo json_encode([
+        'php'        => PHP_VERSION,
+        'sapi'       => PHP_SAPI,
+        'root'       => $root,
+        'functions'  => file_exists($root . '/functions.php') ? 'ok' : 'MANQUANT',
+        'config'     => file_exists($root . '/config.php')    ? 'ok' : 'MANQUANT',
+        'token_sent' => isset($_GET['token']) ? substr($_GET['token'], 0, 8) . '...' : 'absent',
+    ]);
+    exit;
+}
+
 require_once $root . '/functions.php';
 
 if ($isHttp) {
