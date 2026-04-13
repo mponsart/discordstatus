@@ -15,13 +15,13 @@
  * Doit correspondre EXACTEMENT au domaine servi en HTTPS.
  * À CONFIGURER ↓
  */
-define('WEBAUTHN_RP_ID',   'mondomaine.com');
+define('WEBAUTHN_RP_ID',   'maximeponsart.fr');
 
 /**
  * Origine complète attendue lors de la vérification WebAuthn.
  * À CONFIGURER ↓
  */
-define('WEBAUTHN_ORIGIN',  'https://mondomaine.com');
+define('WEBAUTHN_ORIGIN',  'https://maximeponsart.fr');
 
 /** Nom affiché dans le dialogue Passkey du navigateur. */
 define('WEBAUTHN_RP_NAME', 'Discord Guard');
@@ -38,7 +38,7 @@ define('WEBAUTHN_RP_NAME', 'Discord Guard');
  *     Sans ce token valide dans le cookie DGRD_ACCESS, toutes les pages
  *     /admin/ (sauf gate.php) sont inaccessibles.
  */
-define('ADMIN_SECRET_TOKEN', 'CHANGEZ_MOI_AVEC_php_-r_echo_bin2hex(random_bytes(32))');
+define('ADMIN_SECRET_TOKEN', '0ddc5754eed135091324b6a0abca67f2ae917ef012721064c064ff0ba545f1b6');
 
 // =============================================================================
 // BASE DE DONNÉES SQLITE
