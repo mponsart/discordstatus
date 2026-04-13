@@ -12,6 +12,7 @@
 require_once __DIR__ . '/../functions.php';
 init_secure_session();
 check_admin_ip();
+require_secret_token();
 require_admin();
 
 // Uniquement POST
@@ -75,10 +76,8 @@ if ($action === 'update_settings') {
     // Limiter la longueur du message
     $customMessage = substr($customMessage, 0, 500);
 
-    $settings                   = read_json(SETTINGS_FILE, []);
-    $settings['discord_webhook'] = $webhookUrl;
-    $settings['customMessage']   = $customMessage;
-    write_json(SETTINGS_FILE, $settings);
+    set_setting('discord_webhook', $webhookUrl);
+    set_setting('custom_message',  $customMessage);
 
     log_action('settings_updated');
     header('Location: /admin/dashboard.php?success=settings_saved&tab=settings');
@@ -89,8 +88,7 @@ if ($action === 'update_settings') {
 // Purge des logs
 // =============================================================================
 if ($action === 'clear_logs') {
-    write_json(LOGS_FILE, []);
-    log_action('logs_cleared');
+    clear_logs();
     header('Location: /admin/dashboard.php?success=logs_cleared');
     exit;
 }
@@ -99,7 +97,7 @@ if ($action === 'clear_logs') {
 // Purge des alertes
 // =============================================================================
 if ($action === 'clear_alerts') {
-    write_json(ALERTS_FILE, []);
+    clear_alerts();
     log_action('alerts_cleared');
     header('Location: /admin/dashboard.php?success=alerts_cleared&tab=alerts');
     exit;

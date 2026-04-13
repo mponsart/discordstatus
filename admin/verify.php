@@ -12,6 +12,7 @@
 require_once __DIR__ . '/../functions.php';
 init_secure_session();
 check_admin_ip();
+require_secret_token();
 
 // Réponses exclusivement en JSON
 header('Content-Type: application/json');
@@ -67,10 +68,10 @@ if ($action === 'challenge_register' && $_SERVER['REQUEST_METHOD'] === 'GET') {
     $_SESSION['webauthn_action']    = 'register';
 
     // Identifiant utilisateur stable (aléatoire, non lié à un compte)
-    $settings = read_json(SETTINGS_FILE, []);
-    if (empty($settings['webauthn_user_id'])) {
-        $settings['webauthn_user_id'] = base64url_encode(random_bytes(16));
-        write_json(SETTINGS_FILE, $settings);
+    $userId = get_setting('webauthn_user_id');
+    if (empty($userId)) {
+        $userId = base64url_encode(random_bytes(16));
+        set_setting('webauthn_user_id', $userId);
     }
 
     echo json_encode([
@@ -80,7 +81,7 @@ if ($action === 'challenge_register' && $_SERVER['REQUEST_METHOD'] === 'GET') {
             'name' => WEBAUTHN_RP_NAME,
         ],
         'user' => [
-            'id'          => $settings['webauthn_user_id'],
+            'id'          => $userId,
             'name'        => 'admin',
             'displayName' => 'Administrateur',
         ],

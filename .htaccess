@@ -2,7 +2,7 @@
 # Discord Guard — .htaccess racine
 # ---------------------------------------------------------------------------
 
-# HTTPS obligatoire (décommenter si votre hébergeur le supporte)
+# HTTPS obligatoire — décommenter si votre hébergeur supporte mod_rewrite
 # RewriteEngine On
 # RewriteCond %{HTTPS} off
 # RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
@@ -13,23 +13,40 @@ ServerSignature Off
 # Empêcher la liste des répertoires
 Options -Indexes
 
-# Empêcher l'accès direct aux fichiers sensibles
-<FilesMatch "\.(json|log|bak|tmp|sql|env)$">
+# ── Blocage des fichiers sensibles ────────────────────────────────────────
+# Bases de données, JSON, logs, sauvegardes, variables d'environnement, SQL
+<FilesMatch "\.(sqlite|db|json|log|bak|tmp|sql|env|sh|htpasswd|pem|key|crt)$">
     Require all denied
 </FilesMatch>
 
-# Protéger config.php et functions.php depuis l'extérieur
-<FilesMatch "^(config|functions)\.php$">
+# Fichiers PHP internes non exposables
+<FilesMatch "^(config|config-example|functions)\.php$">
     Require all denied
 </FilesMatch>
 
-# En-têtes de sécurité
+# Bloquer les tentatives de traversée de répertoire dans l'URL
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{REQUEST_URI} \.\. [NC]
+    RewriteRule .* - [F,L]
+</IfModule>
+
+# ── En-têtes de sécurité HTTP ─────────────────────────────────────────────
 <IfModule mod_headers.c>
-    Header always set X-Content-Type-Options "nosniff"
-    Header always set X-Frame-Options "DENY"
-    Header always set X-XSS-Protection "1; mode=block"
-    Header always set Referrer-Policy "strict-origin-when-cross-origin"
-    Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
-    # CSP strict — adapté aux passkeys et Tailwind CDN
-    Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none';"
+    Header always set X-Content-Type-Options   "nosniff"
+    Header always set X-Frame-Options          "DENY"
+    Header always set X-XSS-Protection         "1; mode=block"
+    Header always set Referrer-Policy          "strict-origin-when-cross-origin"
+    Header always set Permissions-Policy       "geolocation=(), microphone=(), camera=(), payment=()"
+    Header always set Cross-Origin-Opener-Policy "same-origin"
+    # CSP strict — Tailwind CDN + WebAuthn inline JS
+    Header always set Content-Security-Policy \
+        "default-src 'self'; \
+         script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; \
+         style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; \
+         img-src 'self' data:; \
+         connect-src 'self'; \
+         frame-ancestors 'none'; \
+         base-uri 'self'; \
+         form-action 'self';"
 </IfModule>

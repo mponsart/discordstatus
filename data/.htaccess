@@ -1,3 +1,24 @@
-# Bloquer tout accès direct au répertoire data/
-# Les fichiers JSON ne doivent jamais être accessibles publiquement.
+# ---------------------------------------------------------------------------
+# Discord Guard — .htaccess data/
+# INTERDICTION TOTALE d'accès depuis le web.
+# Ce répertoire contient la base SQLite, les tokens et les logs.
+# ---------------------------------------------------------------------------
+
+# Méthode Apache 2.4
 Require all denied
+
+# Méthode Apache 2.2 (compatibilité cPanel ancien)
+<IfModule !mod_authz_core.c>
+    Order deny,allow
+    Deny from all
+</IfModule>
+
+# Bloquer en sus les extensions sensibles (défense en profondeur)
+<FilesMatch "\.(sqlite|db|json|log|bak|tmp|sql|env|php|pem|key)$">
+    Require all denied
+</FilesMatch>
+
+# Désactiver l'exécution PHP dans ce dossier (au cas où)
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>

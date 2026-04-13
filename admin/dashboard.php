@@ -8,15 +8,18 @@
 require_once __DIR__ . '/../functions.php';
 init_secure_session();
 check_admin_ip();
+require_secret_token();
 require_admin();
 
 // Données
-$statusData = get_status();
-$status     = $statusData['status'];
-$logs       = read_json(LOGS_FILE,   []);
-$alerts     = read_json(ALERTS_FILE, []);
-$settings   = read_json(SETTINGS_FILE, []);
+$statusData  = get_status();
+$status      = $statusData['status'];
+$logs        = get_logs(50);
+$alerts      = get_alerts(30);
+$settings    = ['discord_webhook' => get_setting('discord_webhook', ''), 'customMessage' => get_setting('custom_message', '')];
 $credentials = get_credentials();
+$totalLogs   = count_table('logs');
+$totalAlerts = count_table('alerts');
 
 // CSRF token
 $csrf = generate_csrf_token();
@@ -105,11 +108,11 @@ $sc = $statusCfg[$status] ?? $statusCfg['secure'];
             <div class="bg-gray-900 ring-1 ring-gray-800 rounded-2xl p-6 flex flex-col justify-between">
                 <div class="flex justify-between text-sm">
                     <span class="text-gray-500">Logs totaux</span>
-                    <span class="text-white font-semibold"><?= count($logs) ?></span>
+                    <span class="text-white font-semibold"><?= $totalLogs ?></span>
                 </div>
                 <div class="flex justify-between text-sm mt-3">
                     <span class="text-gray-500">Alertes</span>
-                    <span class="text-yellow-400 font-semibold"><?= count($alerts) ?></span>
+                    <span class="text-yellow-400 font-semibold"><?= $totalAlerts ?></span>
                 </div>
                 <div class="flex justify-between text-sm mt-3">
                     <span class="text-gray-500">Passkeys</span>
@@ -152,10 +155,10 @@ $sc = $statusCfg[$status] ?? $statusCfg['secure'];
         <!-- Onglets -->
         <div class="flex gap-1 border-b border-gray-800 mb-6">
             <button onclick="showTab('logs')"    id="tab-logs"    class="tab-btn active px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 transition-colors">
-                Logs <span class="ml-1.5 bg-gray-800 text-gray-400 rounded-full px-1.5 py-0.5 text-xs"><?= count($logs) ?></span>
+                Logs <span class="ml-1.5 bg-gray-800 text-gray-400 rounded-full px-1.5 py-0.5 text-xs"><?= $totalLogs ?></span>
             </button>
             <button onclick="showTab('alerts')"  id="tab-alerts"  class="tab-btn px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 transition-colors">
-                Alertes <?php if ($alerts): ?><span class="ml-1.5 bg-yellow-900 text-yellow-400 rounded-full px-1.5 py-0.5 text-xs"><?= count($alerts) ?></span><?php endif; ?>
+                Alertes <?php if ($alerts): ?><span class="ml-1.5 bg-yellow-900 text-yellow-400 rounded-full px-1.5 py-0.5 text-xs"><?= $totalAlerts ?></span><?php endif; ?>
             </button>
             <button onclick="showTab('settings')" id="tab-settings" class="tab-btn px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 transition-colors">
                 Paramètres
@@ -194,6 +197,8 @@ $sc = $statusCfg[$status] ?? $statusCfg['secure'];
                                     'dashboard_view'      => '<span class="text-gray-300">👁 Dashboard</span>',
                                     'status_changed'      => '<span class="text-yellow-400">⚙️ Statut modifié</span>',
                                     'passkey_registered'  => '<span class="text-indigo-400">🔑 Passkey enregistrée</span>',
+                                    'gate_success'        => '<span class="text-green-400">🔓 Clé validée</span>',
+                                    'gate_failure'        => '<span class="text-red-400">🔒 Clé incorrecte</span>',
                                     default               => '<span class="text-gray-400">' . htmlspecialchars($log['action'] ?? '', ENT_QUOTES, 'UTF-8') . '</span>',
                                 };
                                 echo $actionLabel;
@@ -209,7 +214,7 @@ $sc = $statusCfg[$status] ?? $statusCfg['secure'];
             </div>
             <?php if (count($logs) > 50): ?>
             <p class="text-gray-600 text-xs text-center mt-3">
-                Affichage des 50 derniers logs sur <?= count($logs) ?> enregistrés.
+                Affichage des 50 derniers logs sur <?= $totalLogs ?> enregistrés.
             </p>
             <?php endif; ?>
 

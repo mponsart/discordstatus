@@ -1,8 +1,0 @@
-{
-    "status": "secure",
-    "lastUpdated": null,
-    "customMessage": "Si vous recevez un lien Discord de ma part, ne cliquez pas.",
-    "discord_webhook": "",
-    "knownIPs": [],
-    "knownUserAgents": []
-}

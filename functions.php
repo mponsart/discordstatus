@@ -223,17 +223,31 @@ function _init_schema(PDO $db): void
             attempts    INTEGER NOT NULL DEFAULT 1,
             first_seen  INTEGER NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS status_history (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            date        TEXT NOT NULL,
+            status      TEXT NOT NULL,
+            note        TEXT
+        );
     ");
 
     // Paramètres par défaut (INSERT OR IGNORE)
     $defaults = [
-        ['status',             'secure'],
-        ['last_updated',       null],
-        ['custom_message',     'Si vous recevez un lien Discord de ma part, ne cliquez pas.'],
-        ['discord_webhook',    ''],
-        ['webauthn_user_id',   null],
-        ['known_ips',          '[]'],
-        ['known_user_agents',  '[]'],
+        ['status',              'secure'],
+        ['last_updated',        null],
+        ['custom_message',      'Si vous recevez un lien Discord de ma part, ne cliquez pas.'],
+        ['discord_webhook',     ''],
+        ['webauthn_user_id',    null],
+        ['known_ips',           '[]'],
+        ['known_user_agents',   '[]'],
+        // Profil Discord (remplacé manuellement dans le dashboard)
+        ['discord_username',    ''],
+        ['discord_discriminator',''],
+        ['discord_avatar_url',  ''],
+        ['discord_bio',         ''],
+        ['discord_joined',      ''],
+        ['show_public_history', '1'],
     ];
     $stmt = $db->prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
     foreach ($defaults as [$k, $v]) {
@@ -255,6 +269,29 @@ function set_setting(string $key, mixed $value): void
 {
     $stmt = get_db()->prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
     $stmt->execute([$key, $value]);
+}
+
+/** Retourne l'historique des changements de statut, du plus récent au plus ancien. */
+function get_status_history(int $limit = 20): array
+{
+    $stmt = get_db()->prepare(
+        'SELECT date, status, note FROM status_history ORDER BY id DESC LIMIT ?'
+    );
+    $stmt->execute([$limit]);
+    return $stmt->fetchAll();
+}
+
+/** Retourne le profil Discord configuré manuellement. */
+function get_discord_profile(): array
+{
+    return [
+        'username'       => get_setting('discord_username',     ''),
+        'discriminator'  => get_setting('discord_discriminator',''),
+        'avatar_url'     => get_setting('discord_avatar_url',   ''),
+        'bio'            => get_setting('discord_bio',          ''),
+        'joined'         => get_setting('discord_joined',       ''),
+        'show_history'   => get_setting('show_public_history',  '1') === '1',
+    ];
 }
 
 // =============================================================================
@@ -375,7 +412,7 @@ function get_status(): array
     ];
 }
 
-function set_status(string $status): void
+function set_status(string $status, string $note = ''): void
 {
     $allowed = ['secure', 'warning', 'compromised'];
     if (!in_array($status, $allowed, true)) {
@@ -383,6 +420,12 @@ function set_status(string $status): void
     }
     set_setting('status',       $status);
     set_setting('last_updated', date('c'));
+
+    // Enregistrer dans l'historique
+    $stmt = get_db()->prepare(
+        'INSERT INTO status_history (date, status, note) VALUES (?, ?, ?)'
+    );
+    $stmt->execute([date('c'), $status, $note ?: null]);
 }
 
 // =============================================================================
