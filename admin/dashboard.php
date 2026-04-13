@@ -18,6 +18,7 @@ $logs        = get_logs(50);
 $alerts      = get_alerts(30);
 $settings    = ['discord_webhook' => get_setting('discord_webhook', ''), 'customMessage' => get_setting('custom_message', '')];
 $credentials = get_credentials();
+$profile     = get_discord_profile();
 $totalLogs   = count_table('logs');
 $totalAlerts = count_table('alerts');
 
@@ -163,6 +164,9 @@ $sc = $statusCfg[$status] ?? $statusCfg['secure'];
             <button onclick="showTab('settings')" id="tab-settings" class="tab-btn px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 transition-colors">
                 Paramètres
             </button>
+            <button onclick="showTab('profile')" id="tab-profile" class="tab-btn px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400 transition-colors">
+                Profil Discord
+            </button>
         </div>
 
         <!-- ── Onglet Logs ── -->
@@ -199,6 +203,10 @@ $sc = $statusCfg[$status] ?? $statusCfg['secure'];
                                     'passkey_registered'  => '<span class="text-indigo-400">🔑 Passkey enregistrée</span>',
                                     'gate_success'        => '<span class="text-green-400">🔓 Clé validée</span>',
                                     'gate_failure'        => '<span class="text-red-400">🔒 Clé incorrecte</span>',
+                                    'profile_updated'     => '<span class="text-blue-400">👤 Profil mis à jour</span>',
+                                    'settings_updated'    => '<span class="text-blue-300">⚙️ Paramètres MAJ</span>',
+                                    'logs_cleared'        => '<span class="text-orange-400">🗑 Logs purgés</span>',
+                                    'alerts_cleared'      => '<span class="text-orange-400">🗑 Alertes purgées</span>',
                                     default               => '<span class="text-gray-400">' . htmlspecialchars($log['action'] ?? '', ENT_QUOTES, 'UTF-8') . '</span>',
                                 };
                                 echo $actionLabel;
@@ -349,6 +357,190 @@ $sc = $statusCfg[$status] ?? $statusCfg['secure'];
             </div>
         </div>
 
+        <!-- ── Onglet Profil Discord ── -->
+        <div id="panel-profile" class="tab-panel">
+
+            <?php
+            // Données monitoring pour cet onglet
+            $botToken   = defined('DISCORD_BOT_TOKEN')      ? DISCORD_BOT_TOKEN      : '';
+            $botUserId  = defined('DISCORD_TARGET_USER_ID') ? DISCORD_TARGET_USER_ID : '';
+            $botGuildId = defined('DISCORD_GUILD_ID')       ? DISCORD_GUILD_ID       : '';
+            $botCfg     = $botToken !== '' && $botUserId !== '' && $botGuildId !== '';
+            $monStatus  = get_setting('discord_monitor_status', 'not_configured');
+            $lastChk    = get_setting('discord_last_check');
+            $chkCount   = (int) get_setting('discord_check_count',   '0');
+            $anomCount  = (int) get_setting('discord_anomaly_count', '0');
+            $snapUser   = get_setting('discord_username',    '');
+            $snapGlobal = get_setting('discord_global_name', '');
+            $snapAvatar = get_setting('discord_avatar_url',  '');
+            $currentStatus = get_setting('status', 'secure');
+            ?>
+
+            <!-- ── Bloc configuration bot ── -->
+            <?php if (!$botCfg): ?>
+            <div class="mb-6 bg-amber-950/40 ring-1 ring-amber-700/40 rounded-xl px-4 py-4">
+                <p class="text-sm font-semibold text-amber-300 mb-2">⚙️ Bot Discord non configuré</p>
+                <p class="text-xs text-amber-500/80 leading-relaxed mb-3">
+                    Pour activer la surveillance automatique, renseignez ces trois constantes dans
+                    <code class="bg-white/[.06] rounded px-1">config.php</code> :
+                </p>
+                <ul class="space-y-1.5 text-xs text-amber-600/80 font-mono">
+                    <li><span class="text-amber-400">DISCORD_BOT_TOKEN</span> — token du bot (discord.com/developers/applications)</li>
+                    <li><span class="text-amber-400">DISCORD_TARGET_USER_ID</span> — votre ID Discord (clic droit → Copier l'identifiant)</li>
+                    <li><span class="text-amber-400">DISCORD_GUILD_ID</span> — ID d'un serveur commun entre le bot et vous</li>
+                </ul>
+                <p class="text-xs text-amber-700/70 mt-3 leading-relaxed">
+                    Ensuite, ajoutez une tâche cron cPanel :<br>
+                    <code class="text-amber-500">*/5 * * * * /usr/bin/php /home/USER/public_html/cron/monitor.php</code>
+                </p>
+            </div>
+            <?php else: ?>
+            <!-- ── Statut bot + snapshot ── -->
+            <div class="mb-6 grid grid-cols-1 sm:grid-cols-3 gap-3">
+
+                <!-- Statut API -->
+                <div class="bg-gray-800/60 ring-1 ring-gray-700 rounded-xl px-4 py-3">
+                    <p class="text-xs text-gray-500 mb-1 uppercase tracking-wider font-medium">Statut API</p>
+                    <div class="flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full flex-shrink-0
+                                     <?= $monStatus === 'ok' ? 'bg-green-400' : 'bg-red-400' ?>"></span>
+                        <span class="text-sm font-semibold <?= $monStatus === 'ok' ? 'text-green-300' : 'text-red-300' ?>">
+                            <?= $monStatus === 'ok' ? 'Connecté' : htmlspecialchars($monStatus, ENT_QUOTES, 'UTF-8') ?>
+                        </span>
+                    </div>
+                    <p class="text-xs text-gray-600 mt-1">
+                        <?= $chkCount ?> vérif. · <?= $anomCount ?> anomalie(s)
+                    </p>
+                </div>
+
+                <!-- Dernière vérification -->
+                <div class="bg-gray-800/60 ring-1 ring-gray-700 rounded-xl px-4 py-3">
+                    <p class="text-xs text-gray-500 mb-1 uppercase tracking-wider font-medium">Dernière vérif.</p>
+                    <p class="text-sm font-semibold text-white">
+                        <?= $lastChk ? htmlspecialchars(format_date($lastChk), ENT_QUOTES, 'UTF-8') : 'Aucune' ?>
+                    </p>
+                    <p class="text-xs text-gray-600 mt-1">fréquence cron ≈ 5 min</p>
+                </div>
+
+                <!-- Snapshot actuel -->
+                <div class="bg-gray-800/60 ring-1 ring-gray-700 rounded-xl px-4 py-3">
+                    <p class="text-xs text-gray-500 mb-2 uppercase tracking-wider font-medium">Snapshot Discord</p>
+                    <?php if ($snapUser): ?>
+                    <div class="flex items-center gap-2">
+                        <?php if ($snapAvatar): ?>
+                        <img src="<?= htmlspecialchars($snapAvatar, ENT_QUOTES, 'UTF-8') ?>"
+                             alt="" class="w-7 h-7 rounded-full bg-gray-700"
+                             onerror="this.style.display='none'">
+                        <?php endif; ?>
+                        <div class="min-w-0">
+                            <p class="text-sm text-white truncate font-medium">
+                                <?= htmlspecialchars($snapGlobal ?: $snapUser, ENT_QUOTES, 'UTF-8') ?>
+                            </p>
+                            <?php if ($snapGlobal && $snapGlobal !== $snapUser): ?>
+                            <p class="text-xs text-gray-600 font-mono">@<?= htmlspecialchars($snapUser, ENT_QUOTES, 'UTF-8') ?></p>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                    <?php else: ?>
+                    <p class="text-xs text-gray-600">En attente du 1er cycle cron</p>
+                    <?php endif; ?>
+                </div>
+            </div>
+            <?php endif; ?>
+
+            <!-- ── Actions monitoring ── -->
+            <div class="flex flex-wrap gap-3 mb-6">
+                <!-- Vérifier maintenant -->
+                <form method="POST" action="/admin/actions.php">
+                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
+                    <input type="hidden" name="action" value="run_monitor">
+                    <button type="submit" <?= !$botCfg ? 'disabled title="Configurez d\'abord le bot dans config.php"' : '' ?>
+                            class="flex items-center gap-2 bg-indigo-700 hover:bg-indigo-600 disabled:opacity-40
+                                   disabled:cursor-not-allowed text-white font-semibold px-4 py-2 rounded-xl text-sm
+                                   transition-colors">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.51"/>
+                        </svg>
+                        Vérifier maintenant
+                    </button>
+                </form>
+
+                <!-- Marquer comme sécurisé -->
+                <?php if ($currentStatus !== 'secure'): ?>
+                <form method="POST" action="/admin/actions.php"
+                      onsubmit="return confirm('Confirmer : réinitialiser le statut à « Sécurisé » ?')">
+                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
+                    <input type="hidden" name="action" value="reset_to_secure">
+                    <button type="submit"
+                            class="flex items-center gap-2 bg-emerald-700 hover:bg-emerald-600 text-white
+                                   font-semibold px-4 py-2 rounded-xl text-sm transition-colors">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                        </svg>
+                        Marquer comme sécurisé
+                    </button>
+                </form>
+                <?php endif; ?>
+            </div>
+
+            <!-- ── Champs manuels (non auto-remplis par le bot) ── -->
+            <div class="border-t border-gray-800 pt-6">
+                <h4 class="text-sm font-semibold text-gray-300 mb-1">Informations manuelles</h4>
+                <p class="text-xs text-gray-600 mb-4">
+                    Le bot remplit automatiquement le nom d'utilisateur et l'avatar.
+                    Seuls la bio et la date d'inscription compte nécessitent une saisie manuelle.
+                </p>
+
+                <form method="POST" action="/admin/actions.php" class="space-y-4 max-w-xl">
+                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
+                    <input type="hidden" name="action"     value="update_profile">
+
+                    <!-- Bio (non disponible via API Discord pour les bots) -->
+                    <div>
+                        <label for="discord_bio" class="block text-sm font-medium text-gray-300 mb-1.5">
+                            Bio <span class="text-gray-600 font-normal">(non accessible via API — saisie manuelle)</span>
+                        </label>
+                        <textarea id="discord_bio" name="discord_bio" rows="2" maxlength="300"
+                                  placeholder="Votre description publique…"
+                                  class="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-sm
+                                         text-gray-100 placeholder-gray-600 focus:outline-none focus:ring-2
+                                         focus:ring-indigo-500 focus:border-transparent resize-none"
+                        ><?= htmlspecialchars($profile['bio'], ENT_QUOTES, 'UTF-8') ?></textarea>
+                    </div>
+
+                    <!-- Date de création du compte -->
+                    <div>
+                        <label for="discord_joined" class="block text-sm font-medium text-gray-300 mb-1.5">
+                            Compte Discord créé en
+                        </label>
+                        <input type="text" id="discord_joined" name="discord_joined" maxlength="30"
+                               value="<?= htmlspecialchars($profile['joined'], ENT_QUOTES, 'UTF-8') ?>"
+                               placeholder="janvier 2020"
+                               class="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-sm
+                                      text-gray-100 placeholder-gray-600 focus:outline-none focus:ring-2
+                                      focus:ring-indigo-500 focus:border-transparent">
+                        <p class="text-gray-600 text-xs mt-1">Affiché tel quel. La date de rejoint-serveur est auto-détectée par le bot.</p>
+                    </div>
+
+                    <!-- Afficher l'historique public -->
+                    <div class="flex items-center gap-3 cursor-pointer">
+                        <input type="checkbox" id="show_public_history" name="show_public_history" value="1"
+                               <?= $profile['show_history'] ? 'checked' : '' ?>
+                               class="w-4 h-4 rounded bg-gray-700 border-gray-600 text-indigo-500 focus:ring-indigo-500">
+                        <label for="show_public_history" class="text-sm text-gray-300 cursor-pointer">
+                            Afficher l'historique des événements sur la page publique
+                        </label>
+                    </div>
+
+                    <button type="submit"
+                            class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold
+                                   px-5 py-2.5 rounded-xl text-sm transition-colors">
+                        Enregistrer
+                    </button>
+                </form>
+            </div>
+        </div>
+
     </section>
 
 </main>
@@ -361,14 +553,22 @@ $sc = $statusCfg[$status] ?? $statusCfg['secure'];
 </footer>
 
 <script>
+const TABS = ['logs', 'alerts', 'settings', 'profile'];
+
 function showTab(name) {
-    ['logs', 'alerts', 'settings'].forEach(t => {
+    TABS.forEach(t => {
         document.getElementById('tab-'   + t).classList.remove('active');
         document.getElementById('panel-' + t).classList.remove('active');
     });
     document.getElementById('tab-'   + name).classList.add('active');
     document.getElementById('panel-' + name).classList.add('active');
 }
+
+// Ouverture automatique de l'onglet depuis le paramètre URL ?tab=xxx
+(function () {
+    const p = new URLSearchParams(location.search).get('tab');
+    if (p && TABS.includes(p)) showTab(p);
+})();
 </script>
 
 </body>

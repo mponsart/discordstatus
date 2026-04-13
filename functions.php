@@ -244,10 +244,26 @@ function _init_schema(PDO $db): void
         // Profil Discord (remplacé manuellement dans le dashboard)
         ['discord_username',    ''],
         ['discord_discriminator',''],
+        ['discord_global_name', ''],
         ['discord_avatar_url',  ''],
+        ['discord_avatar_hash', ''],
         ['discord_bio',         ''],
         ['discord_joined',      ''],
+        ['discord_guild_joined_at', ''],
         ['show_public_history', '1'],
+        // Snapshot bot (mis à jour par cron/monitor.php)
+        ['discord_was_in_guild',    '1'],
+        ['discord_snap_username',   ''],
+        ['discord_snap_global_name',''],
+        ['discord_snap_avatar',     ''],
+        ['discord_snap_discrim',    ''],
+        ['discord_snap_nick',       ''],
+        // Monitoring meta
+        ['discord_last_check',       null],
+        ['discord_monitor_status',   'not_configured'],
+        ['discord_check_count',      '0'],
+        ['discord_anomaly_count',    '0'],
+        ['status_source',            'manual'],
     ];
     $stmt = $db->prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
     foreach ($defaults as [$k, $v]) {
@@ -281,16 +297,18 @@ function get_status_history(int $limit = 20): array
     return $stmt->fetchAll();
 }
 
-/** Retourne le profil Discord configuré manuellement. */
+/** Retourne le profil Discord configuré (auto via bot + champs manuels). */
 function get_discord_profile(): array
 {
     return [
-        'username'       => get_setting('discord_username',     ''),
-        'discriminator'  => get_setting('discord_discriminator',''),
-        'avatar_url'     => get_setting('discord_avatar_url',   ''),
-        'bio'            => get_setting('discord_bio',          ''),
-        'joined'         => get_setting('discord_joined',       ''),
-        'show_history'   => get_setting('show_public_history',  '1') === '1',
+        'username'       => get_setting('discord_username',        ''),
+        'global_name'    => get_setting('discord_global_name',     ''),
+        'discriminator'  => get_setting('discord_discriminator',   ''),
+        'avatar_url'     => get_setting('discord_avatar_url',      ''),
+        'bio'            => get_setting('discord_bio',             ''),
+        'joined'         => get_setting('discord_joined',          ''),
+        'guild_joined'   => get_setting('discord_guild_joined_at', ''),
+        'show_history'   => get_setting('show_public_history',     '1') === '1',
     ];
 }
 
@@ -593,6 +611,295 @@ function _discord_post(string $url, array $payload): void
         ],
     ]);
     @file_get_contents($url, false, $ctx);
+}
+
+// =============================================================================
+// DISCORD BOT — SURVEILLANCE AUTOMATIQUE
+// =============================================================================
+
+/**
+ * Requête GET vers l'API Discord v10 (cURL).
+ * Retourne ['ok'=>bool, 'http'=>int, 'data'=>array|null, 'error'=>string|null].
+ */
+function discord_api_get(string $endpoint): array
+{
+    if (!defined('DISCORD_BOT_TOKEN') || DISCORD_BOT_TOKEN === '') {
+        return ['ok' => false, 'http' => 0, 'data' => null, 'error' => 'no_token'];
+    }
+
+    if (!function_exists('curl_init')) {
+        return ['ok' => false, 'http' => 0, 'data' => null, 'error' => 'curl_unavailable'];
+    }
+
+    $url = 'https://discord.com/api/v10' . $endpoint;
+    $ch  = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER     => [
+            'Authorization: Bot ' . DISCORD_BOT_TOKEN,
+            'User-Agent: DiscordGuard/2.0',
+        ],
+        CURLOPT_TIMEOUT        => 10,
+        CURLOPT_CONNECTTIMEOUT => 5,
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_SSL_VERIFYHOST => 2,
+    ]);
+
+    $body = curl_exec($ch);
+    $http = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err  = curl_error($ch);
+    curl_close($ch);
+
+    if ($body === false) {
+        return ['ok' => false, 'http' => 0, 'data' => null, 'error' => $err];
+    }
+
+    $data = json_decode($body, true);
+    return [
+        'ok'    => $http >= 200 && $http < 300,
+        'http'  => $http,
+        'data'  => is_array($data) ? $data : null,
+        'error' => is_array($data) ? ($data['message'] ?? null) : null,
+    ];
+}
+
+/**
+ * Envoie un embed de monitoring au webhook Discord configuré.
+ * @param array $fields  [['name'=>..., 'value'=>..., 'inline'=>bool], ...]
+ */
+function send_monitor_webhook(string $title, string $description, int $color, array $fields = []): void
+{
+    $url = get_setting('discord_webhook', '');
+    if (empty($url)) {
+        return;
+    }
+    $payload = [
+        'embeds' => [[
+            'title'       => $title,
+            'description' => $description,
+            'color'       => $color,
+            'fields'      => $fields,
+            'timestamp'   => date('c'),
+            'footer'      => ['text' => 'Discord Guard — Surveillance automatique'],
+        ]],
+    ];
+    _discord_post($url, $payload);
+}
+
+/**
+ * Fonction principale de surveillance Discord.
+ * Appelée par cron/monitor.php toutes les N minutes.
+ *
+ * @return array  Résumé de l'exécution pour journalisation.
+ */
+function run_discord_monitor(): array
+{
+    $token   = defined('DISCORD_BOT_TOKEN')        ? DISCORD_BOT_TOKEN        : '';
+    $userId  = defined('DISCORD_TARGET_USER_ID')   ? DISCORD_TARGET_USER_ID   : '';
+    $guildId = defined('DISCORD_GUILD_ID')         ? DISCORD_GUILD_ID         : '';
+
+    if ($token === '' || $userId === '' || $guildId === '') {
+        set_setting('discord_monitor_status', 'not_configured');
+        return ['status' => 'not_configured'];
+    }
+
+    // Horodater la vérification
+    set_setting('discord_last_check', date('c'));
+    $count = (int) get_setting('discord_check_count', '0') + 1;
+    set_setting('discord_check_count', (string) $count);
+
+    // ── Appel API ──────────────────────────────────────────────────────────
+    $res = discord_api_get('/guilds/' . $guildId . '/members/' . $userId);
+
+    // 404 = l'utilisateur n'est plus dans le serveur (fort signal de compromission)
+    if (!$res['ok'] && $res['http'] === 404) {
+        $wasIn = get_setting('discord_was_in_guild', '1');
+        if ($wasIn === '1') {
+            set_setting('discord_was_in_guild', '0');
+            add_alert('discord_left_guild',
+                'Le compte Discord a quitté le serveur de surveillance.',
+                ['guild_id' => $guildId]);
+            send_monitor_webhook(
+                '🚨 Alerte critique — Compte disparu',
+                "Le compte Discord surveillé a **quitté le serveur** de surveillance.\n"
+                . "Cela peut indiquer une compromission du compte.",
+                0xED4245,
+                [['name' => 'Action recommandée',
+                  'value' => 'Marquez le compte comme compromis depuis le dashboard.',
+                  'inline' => false]]
+            );
+            _monitor_escalate('compromised', 'Compte sorti du serveur de surveillance');
+        }
+        set_setting('discord_monitor_status', 'error_404');
+        return ['status' => 'user_not_in_guild'];
+    }
+
+    // Autre erreur réseau / API
+    if (!$res['ok']) {
+        set_setting('discord_monitor_status', 'error_' . $res['http']);
+        return ['status' => 'api_error', 'http' => $res['http'], 'error' => $res['error']];
+    }
+
+    // ── Données reçues ─────────────────────────────────────────────────────
+    set_setting('discord_monitor_status', 'ok');
+    set_setting('discord_was_in_guild', '1');
+
+    $member       = $res['data'];
+    $user         = $member['user'] ?? [];
+    $curUsername  = $user['username']      ?? '';
+    $curGlobName  = $user['global_name']   ?? '';
+    $curAvatarH   = $user['avatar']        ?? '';
+    $curDiscrim   = $user['discriminator'] ?? '0';
+    $curNick      = $member['nick']        ?? '';
+    $curJoined    = $member['joined_at']   ?? '';
+    $uid          = $user['id']            ?? $userId;
+
+    // Construire l'URL d'avatar publique (CDN Discord)
+    if ($curAvatarH !== '') {
+        $ext       = str_starts_with($curAvatarH, 'a_') ? 'gif' : 'webp';
+        $avatarUrl = "https://cdn.discordapp.com/avatars/{$uid}/{$curAvatarH}.{$ext}?size=256";
+    } else {
+        $idx       = (int)((PHP_INT_SIZE >= 8 ? ((int)$uid >> 22) : 0) % 6);
+        $avatarUrl = "https://cdn.discordapp.com/embed/avatars/{$idx}.png";
+    }
+
+    // Persister les données de profil (accessibles à la page publique)
+    set_setting('discord_username',        $curUsername);
+    set_setting('discord_global_name',     $curGlobName);
+    set_setting('discord_discriminator',   $curDiscrim !== '0' ? $curDiscrim : '');
+    set_setting('discord_avatar_url',      $avatarUrl);
+    set_setting('discord_avatar_hash',     $curAvatarH);
+    if ($curJoined) {
+        set_setting('discord_guild_joined_at', $curJoined);
+    }
+
+    // ── Comparaison avec le snapshot précédent ─────────────────────────────
+    $prevUsername = get_setting('discord_snap_username',    '');
+    $prevGlobName = get_setting('discord_snap_global_name', '');
+    $prevAvatarH  = get_setting('discord_snap_avatar',      '');
+    $prevDiscrim  = get_setting('discord_snap_discrim',     '');
+
+    $firstRun = ($prevUsername === '' && $prevAvatarH === '');
+    $changes  = [];
+    $score    = 0;
+
+    if (!$firstRun) {
+        // Nom d'utilisateur (fort signal d'alerte)
+        if ($curUsername !== $prevUsername && $prevUsername !== '') {
+            $changes[] = ['type' => 'username', 'from' => $prevUsername, 'to' => $curUsername];
+            $score += 3;
+            add_alert('username_changed',
+                "Nom d'utilisateur modifié : {$prevUsername} → {$curUsername}",
+                ['from' => $prevUsername, 'to' => $curUsername]);
+            send_monitor_webhook(
+                "⚠️ Changement de nom d'utilisateur",
+                "Le nom d'utilisateur du compte surveillé a été **modifié**.",
+                0xFEE75C,
+                [
+                    ['name' => 'Avant', 'value' => "`{$prevUsername}`", 'inline' => true],
+                    ['name' => 'Après', 'value' => "`{$curUsername}`",  'inline' => true],
+                ]
+            );
+            _monitor_insert_history('warning',
+                "Nom d'utilisateur modifié : {$prevUsername} → {$curUsername}");
+        }
+
+        // Nom d'affichage global (signal modéré)
+        if ($curGlobName !== $prevGlobName && $prevGlobName !== '') {
+            $changes[] = ['type' => 'global_name', 'from' => $prevGlobName, 'to' => $curGlobName];
+            $score += 2;
+            send_monitor_webhook(
+                "ℹ️ Nom d'affichage modifié",
+                "Le nom d'affichage global du compte a changé.",
+                0x5865F2,
+                [
+                    ['name' => 'Avant', 'value' => "`{$prevGlobName}`", 'inline' => true],
+                    ['name' => 'Après', 'value' => "`{$curGlobName}`",  'inline' => true],
+                ]
+            );
+            _monitor_insert_history('warning',
+                "Nom d'affichage modifié : {$prevGlobName} → {$curGlobName}");
+        }
+
+        // Avatar (signal faible — peut être légitime)
+        if ($curAvatarH !== $prevAvatarH && $prevAvatarH !== '') {
+            $changes[] = ['type' => 'avatar'];
+            $score += 1;
+            add_alert('avatar_changed', "L'avatar du compte Discord a été modifié.", []);
+            send_monitor_webhook(
+                'ℹ️ Avatar modifié',
+                "L'avatar du compte Discord surveillé a changé.",
+                0x5865F2,
+                [['name' => 'Nouveau', 'value' => $avatarUrl, 'inline' => false]]
+            );
+            _monitor_insert_history('warning', 'Avatar du compte Discord modifié');
+        }
+
+        // Discriminant (signal modéré)
+        if ($curDiscrim !== $prevDiscrim && $prevDiscrim !== '0' && $prevDiscrim !== '') {
+            $changes[] = ['type' => 'discriminator', 'from' => $prevDiscrim, 'to' => $curDiscrim];
+            $score += 2;
+            _monitor_insert_history('warning',
+                "Discriminant modifié : #{$prevDiscrim} → #{$curDiscrim}");
+        }
+    }
+
+    // Persister le snapshot
+    set_setting('discord_snap_username',    $curUsername);
+    set_setting('discord_snap_global_name', $curGlobName);
+    set_setting('discord_snap_avatar',      $curAvatarH);
+    set_setting('discord_snap_discrim',     $curDiscrim);
+    set_setting('discord_snap_nick',        $curNick);
+
+    // Compteur d'anomalies cumulées
+    if ($score > 0) {
+        $prev = (int) get_setting('discord_anomaly_count', '0');
+        set_setting('discord_anomaly_count', (string) ($prev + $score));
+    }
+
+    // Escalade automatique du statut (jamais de descente automatique)
+    if ($score >= 3) {
+        _monitor_escalate('compromised', 'Anomalies multiples détectées automatiquement');
+    } elseif ($score >= 1) {
+        _monitor_escalate('warning', 'Changement de profil détecté automatiquement');
+    }
+
+    return [
+        'status'    => 'ok',
+        'first_run' => $firstRun,
+        'changes'   => $changes,
+        'score'     => $score,
+        'user'      => [
+            'username'    => $curUsername,
+            'global_name' => $curGlobName,
+            'avatar_hash' => $curAvatarH,
+        ],
+    ];
+}
+
+/**
+ * Escalade automatique du statut (jamais de descente).
+ * Ne remplace un statut existant que si le nouveau est plus sévère.
+ */
+function _monitor_escalate(string $newStatus, string $note): void
+{
+    $order   = ['secure' => 0, 'warning' => 1, 'compromised' => 2];
+    $current = get_setting('status', 'secure');
+    if (($order[$newStatus] ?? 0) > ($order[$current] ?? 0)) {
+        set_setting('status',        $newStatus);
+        set_setting('last_updated',  date('c'));
+        set_setting('status_source', 'auto');
+        _monitor_insert_history($newStatus, '[AUTO] ' . $note);
+    }
+}
+
+/** Insère directement dans status_history sans passer par set_status(). */
+function _monitor_insert_history(string $status, string $note = ''): void
+{
+    $stmt = get_db()->prepare(
+        'INSERT INTO status_history (date, status, note) VALUES (?, ?, ?)'
+    );
+    $stmt->execute([date('c'), $status, $note ?: null]);
 }
 
 // =============================================================================

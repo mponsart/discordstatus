@@ -1,0 +1,18 @@
+# Discord Guard — Blocage d'accès web au répertoire cron/
+# Les scripts cron sont conçus pour être exécutés en CLI uniquement.
+
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order deny,allow
+    Deny from all
+</IfModule>
+
+# Désactiver l'exécution PHP (sécurité supplémentaire)
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php8.c>
+    php_flag engine off
+</IfModule>

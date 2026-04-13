@@ -86,3 +86,38 @@ define('MAX_ALERTS', 200);
  * Exemple multi-IP : ['1.2.3.4', '5.6.7.8']
  */
 define('ALLOWED_ADMIN_IPS', []);
+
+// =============================================================================
+// SURVEILLANCE DISCORD AUTOMATIQUE — BOT API
+// =============================================================================
+
+/**
+ * Token du bot Discord (surveillance automatique via API REST + tâche cron).
+ *
+ * Étapes de configuration :
+ *  1. Rendez-vous sur https://discord.com/developers/applications
+ *  2. Créez une application → onglet "Bot" → "Reset Token" → copiez le token
+ *  3. Dans "Privileged Gateway Intents", activez "Server Members Intent"
+ *  4. Générez un lien d'invitation : OAuth2 → URL Generator
+ *     Scopes : bot — Permissions : aucune (lecture seule via API)
+ *  5. Invitez le bot sur n'importe quel serveur dont vous êtes membre
+ *
+ * Laissez vide pour désactiver le monitoring automatique.
+ * À CONFIGURER ↓
+ */
+define('DISCORD_BOT_TOKEN', '');
+
+/**
+ * ID Discord du compte à surveiller (le vôtre).
+ *  → Activez "Mode développeur" dans Discord (Paramètres → Avancé)
+ *  → Clic droit sur votre profil → "Copier l'identifiant".
+ * À CONFIGURER ↓
+ */
+define('DISCORD_TARGET_USER_ID', '');
+
+/**
+ * ID d'un serveur Discord (guild) dont le bot ET vous êtes tous deux membres.
+ *  → Clic droit sur le nom du serveur → "Copier l'identifiant".
+ * À CONFIGURER ↓
+ */
+define('DISCORD_GUILD_ID', '');
