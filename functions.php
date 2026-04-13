@@ -1247,38 +1247,16 @@ function is_installed(): bool
 }
 
 // =============================================================================
-// CLÉ D'ACCÈS ADMIN (TOKEN SECRET — NON CONTOURNABLE)
+// AUTHENTIFICATION ADMIN (PASSKEY UNIQUEMENT)
 // =============================================================================
 
 /**
- * Vérifie que le cookie DGRD_ACCESS contient le token secret défini dans config.php.
- *
- * Si le token est absent ou incorrect :
- *   → redirection vers /admin/gate.php (page de saisie du token)
- *
- * Le token fait 64 caractères hex (256 bits d'entropie). Même en connaissant
- * l'URL de gate.php, une attaque par force brute est irréalisable.
- * Cette vérification est effectuée AVANT toute autre logique admin,
- * y compris avant la vérification de la Passkey.
+ * Stub de compatibilité — le token secret a été supprimé.
+ * L'accès admin est protégé uniquement par WebAuthn (Passkey).
  */
 function require_secret_token(): void
 {
-    // Valider que le token configuré n'est pas encore le placeholder
-    if (str_starts_with(ADMIN_SECRET_TOKEN, 'CHANGEZ_MOI')) {
-        http_response_code(503);
-        exit('⚠️ Discord Guard non configuré : modifiez ADMIN_SECRET_TOKEN dans config.php.');
-    }
-
-    $provided = $_COOKIE['DGRD_ACCESS'] ?? '';
-
-    if (!hash_equals(ADMIN_SECRET_TOKEN, $provided)) {
-        // Détruire le cookie invalide s'il existe
-        if ($provided !== '') {
-            setcookie('DGRD_ACCESS', '', time() - 3600, '/admin/', '', true, true);
-        }
-        header('Location: /admin/gate.php');
-        exit;
-    }
+    // Authentification par Passkey uniquement — token secret désactivé.
 }
 
 // =============================================================================

@@ -12,7 +12,6 @@
 require_once __DIR__ . '/../functions.php';
 init_secure_session();
 check_admin_ip();
-require_secret_token();
 
 // Réponses exclusivement en JSON
 header('Content-Type: application/json');
@@ -215,6 +214,134 @@ if ($action === 'register' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     json_success(['message' => 'Passkey enregistrée avec succès.']);
+}
+
+// =============================================================================
+// GET — Challenge pour AJOUT d'une passkey supplémentaire (admin connecté)
+// =============================================================================
+if ($action === 'challenge_add_passkey' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+
+    if (!is_admin_logged_in()) {
+        json_error('Non authentifié.', 401);
+    }
+
+    $challenge = random_bytes(32);
+    $_SESSION['webauthn_challenge'] = base64url_encode($challenge);
+    $_SESSION['webauthn_action']    = 'add_passkey';
+
+    $userId = get_setting('webauthn_user_id');
+    if (empty($userId)) {
+        $userId = base64url_encode(random_bytes(16));
+        set_setting('webauthn_user_id', $userId);
+    }
+
+    echo json_encode([
+        'challenge' => base64url_encode($challenge),
+        'rp'        => [
+            'id'   => WEBAUTHN_RP_ID,
+            'name' => WEBAUTHN_RP_NAME,
+        ],
+        'user' => [
+            'id'          => $userId,
+            'name'        => 'admin',
+            'displayName' => 'Administrateur',
+        ],
+        'pubKeyCredParams' => [
+            ['type' => 'public-key', 'alg' => -7],
+            ['type' => 'public-key', 'alg' => -257],
+        ],
+        'authenticatorSelection' => [
+            'userVerification' => 'required',
+            'residentKey'      => 'preferred',
+        ],
+        'timeout'     => 60000,
+        'attestation' => 'none',
+    ]);
+    exit;
+}
+
+// =============================================================================
+// POST — Enregistrement d'une passkey supplémentaire (admin connecté)
+// =============================================================================
+if ($action === 'add_passkey' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+
+    if (!is_admin_logged_in()) {
+        json_error('Non authentifié.', 401);
+    }
+
+    $body = get_json_body();
+
+    $credId             = $body['id']                              ?? '';
+    $clientDataJSON_b64 = $body['response']['clientDataJSON']     ?? '';
+    $attestationObj_b64 = $body['response']['attestationObject']  ?? '';
+
+    if (!$credId || !$clientDataJSON_b64 || !$attestationObj_b64) {
+        json_error('Données manquantes.');
+    }
+
+    $storedChallenge = $_SESSION['webauthn_challenge'] ?? '';
+    if (!$storedChallenge || ($_SESSION['webauthn_action'] ?? '') !== 'add_passkey') {
+        json_error('Session invalide ou expirée.', 403);
+    }
+    unset($_SESSION['webauthn_challenge'], $_SESSION['webauthn_action']);
+
+    try {
+        $clientDataJSON    = base64url_decode($clientDataJSON_b64);
+        $attestationObject = base64url_decode($attestationObj_b64);
+
+        $clientData = json_decode($clientDataJSON, true);
+        if (!$clientData) {
+            throw new RuntimeException('clientDataJSON invalide.');
+        }
+        if (($clientData['type'] ?? '') !== 'webauthn.create') {
+            throw new RuntimeException('Type WebAuthn incorrect.');
+        }
+
+        $receivedChallenge = base64url_encode(base64url_decode($clientData['challenge'] ?? ''));
+        if (!hash_equals($storedChallenge, $receivedChallenge)) {
+            throw new RuntimeException('Challenge incorrect.');
+        }
+
+        $expectedOrigin = WEBAUTHN_ORIGIN;
+        if (($clientData['origin'] ?? '') !== $expectedOrigin) {
+            throw new RuntimeException('Origine incorrecte.');
+        }
+
+        $cbor     = cbor_decode($attestationObject);
+        $authData = parse_authenticator_data($cbor['authData'] ?? '');
+
+        if (!$authData['userPresent']) {
+            throw new RuntimeException('Présence utilisateur non confirmée.');
+        }
+        if (empty($authData['credentialId'])) {
+            throw new RuntimeException('Credential ID manquant.');
+        }
+
+        $rpIdHash = hash('sha256', WEBAUTHN_RP_ID, true);
+        if (!hash_equals($rpIdHash, $authData['rpIdHash'])) {
+            throw new RuntimeException('RP ID incorrect.');
+        }
+
+        $coseKey      = cbor_decode($authData['credentialPublicKey']);
+        $publicKeyPem = cose_key_to_pem($coseKey);
+
+        $newCredential = [
+            'id'         => base64url_encode($authData['credentialId']),
+            'publicKey'  => $publicKeyPem,
+            'signCount'  => (int) $authData['signCount'],
+            'name'       => 'Passkey #' . (count(get_credentials()) + 1),
+            'createdAt'  => date('c'),
+            'lastUsed'   => null,
+        ];
+        save_credential($newCredential);
+
+        log_action('passkey_added', ['credential_id' => substr($newCredential['id'], 0, 16) . '…']);
+
+    } catch (RuntimeException $e) {
+        json_error('Erreur d\'enregistrement : ' . $e->getMessage());
+    }
+
+    json_success(['message' => 'Nouvelle Passkey ajoutée avec succès.']);
 }
 
 // =============================================================================

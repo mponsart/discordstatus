@@ -8,7 +8,6 @@
 require_once __DIR__ . '/../functions.php';
 init_secure_session();
 check_admin_ip();
-require_secret_token();
 require_admin();
 
 // Données
@@ -355,6 +354,16 @@ $sc = $statusCfg[$status] ?? $statusCfg['secure'];
                 </div>
                 <?php endif; ?>
             </div>
+
+            <!-- Ajouter une Passkey -->
+            <div class="mt-4">
+                <button id="btn-add-passkey"
+                    onclick="addPasskey()"
+                    class="bg-indigo-700 hover:bg-indigo-600 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors">
+                    + Ajouter une Passkey
+                </button>
+                <div id="add-passkey-status" class="hidden mt-3 ring-1 rounded-xl px-4 py-2.5 text-sm"></div>
+            </div>
         </div>
 
         <!-- ── Onglet Profil Discord ── -->
@@ -569,6 +578,82 @@ function showTab(name) {
     const p = new URLSearchParams(location.search).get('tab');
     if (p && TABS.includes(p)) showTab(p);
 })();
+
+// ── Ajout d'une Passkey depuis le dashboard ──────────────────────────────────
+function b64url(buf) {
+    return btoa(String.fromCharCode(...new Uint8Array(buf)))
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function fromB64url(s) {
+    s = s.replace(/-/g, '+').replace(/_/g, '/');
+    const bin = atob(s), arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return arr.buffer;
+}
+
+async function addPasskey() {
+    const btn = document.getElementById('btn-add-passkey');
+    const box = document.getElementById('add-passkey-status');
+
+    btn.disabled = true;
+    btn.textContent = 'Enregistrement…';
+    showPasskeyStatus('info', '⏳ Récupération du challenge…');
+
+    try {
+        const resp = await fetch('/admin/verify.php?action=challenge_add_passkey');
+        if (!resp.ok) throw new Error('Serveur inaccessible.');
+        const options = await resp.json();
+        if (options.error) throw new Error(options.error);
+
+        options.challenge = fromB64url(options.challenge);
+        options.user.id   = fromB64url(options.user.id);
+
+        showPasskeyStatus('info', '🔑 En attente de votre authentificateur…');
+
+        const credential = await navigator.credentials.create({ publicKey: options });
+
+        showPasskeyStatus('info', '📤 Envoi au serveur…');
+
+        const payload = {
+            id:   credential.id,
+            type: credential.type,
+            response: {
+                clientDataJSON:    b64url(credential.response.clientDataJSON),
+                attestationObject: b64url(credential.response.attestationObject),
+            },
+        };
+
+        const verifyResp = await fetch('/admin/verify.php?action=add_passkey', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify(payload),
+        });
+        const result = await verifyResp.json();
+
+        if (result.success) {
+            showPasskeyStatus('success', '✅ Passkey ajoutée ! Rechargement…');
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            throw new Error(result.error || 'Échec de l\'enregistrement.');
+        }
+    } catch (err) {
+        showPasskeyStatus('error', '❌ ' + (err.message || 'Erreur inconnue.'));
+        btn.disabled    = false;
+        btn.textContent = '+ Ajouter une Passkey';
+    }
+}
+
+function showPasskeyStatus(type, msg) {
+    const box = document.getElementById('add-passkey-status');
+    box.className = 'mt-3 ring-1 rounded-xl px-4 py-2.5 text-sm';
+    const classes = {
+        info:    ['bg-blue-900/40',  'ring-blue-500/40',  'text-blue-300'],
+        success: ['bg-green-900/40', 'ring-green-500/40', 'text-green-300'],
+        error:   ['bg-red-900/40',   'ring-red-500/40',   'text-red-300'],
+    };
+    box.classList.add(...(classes[type] || classes.info));
+    box.textContent = msg;
+}
 </script>
 
 </body>

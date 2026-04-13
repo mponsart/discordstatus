@@ -8,7 +8,6 @@
 require_once __DIR__ . '/../functions.php';
 init_secure_session();
 check_admin_ip();
-require_secret_token();
 
 // Déjà connecté → dashboard
 if (is_admin_logged_in()) {

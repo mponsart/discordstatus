@@ -9,7 +9,6 @@
 require_once __DIR__ . '/../functions.php';
 init_secure_session();
 check_admin_ip();
-require_secret_token();
 
 // Si déjà installé, rediriger vers la connexion
 if (is_installed()) {

@@ -5,7 +5,6 @@
 
 require_once __DIR__ . '/../functions.php';
 init_secure_session();
-require_secret_token();
 
 if (is_admin_logged_in()) {
     log_action('admin_logout');

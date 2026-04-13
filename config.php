@@ -30,16 +30,6 @@ define('WEBAUTHN_RP_NAME', 'Discord Guard');
 // CLÉ D'ACCÈS ADMIN (non contournable)
 // =============================================================================
 
-/**
- * Token secret de 64 caractères hexadécimaux (256 bits d'entropie).
- * Générez-en un avec : php -r "echo bin2hex(random_bytes(32));"
- *
- * ⚠️  OBLIGATOIRE — À CONFIGURER avant toute utilisation.
- *     Sans ce token valide dans le cookie DGRD_ACCESS, toutes les pages
- *     /admin/ (sauf gate.php) sont inaccessibles.
- */
-define('ADMIN_SECRET_TOKEN', '0ddc5754eed135091324b6a0abca67f2ae917ef012721064c064ff0ba545f1b6');
-
 // =============================================================================
 // BASE DE DONNÉES SQLITE
 // =============================================================================

@@ -180,7 +180,7 @@ function ago_php(?string $iso): string {
                 Surveillance manuelle
             </div>
             <?php endif; ?>
-            <a href="/admin/gate.php" class="text-xs text-gray-700 hover:text-gray-400 transition-colors">
+            <a href="/admin/login.php" class="text-xs text-gray-700 hover:text-gray-400 transition-colors">
                 Admin →
             </a>
         </div>
@@ -530,7 +530,7 @@ function ago_php(?string $iso): string {
     <p class="text-center text-gray-800 text-xs pb-2">
         Protégé par <strong class="text-gray-700">Discord Guard</strong>
         &nbsp;·&nbsp;
-        <a href="/admin/gate.php" class="hover:text-gray-600 transition-colors">Administration</a>
+        <a href="/admin/login.php" class="hover:text-gray-600 transition-colors">Administration</a>
     </p>
 
 </div><!-- /max-w-3xl -->
